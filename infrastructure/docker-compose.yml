@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # Jaeger - Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  order-db:
+    image: postgres:16-alpine
+    container_name: order-db
+    environment:
+      - POSTGRES_DB=order_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - order-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  warehouse-db:
+    image: postgres:16-alpine
+    container_name: warehouse-db
+    environment:
+      - POSTGRES_DB=warehouse_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - warehouse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  order-service:
+    build:
+      context: ../services/order-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - SERVICE_NAME=order-service
+      - ENVIRONMENT=development
+      - WAREHOUSE_SERVICE_URL=http://warehouse-service:8002
+      - JAEGER_ENDPOINT=http://jaeger:4318
+      - DB_HOST=order-db
+      - DB_PORT=5432
+      - DB_NAME=order_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - RABBITMQ_URL=amqp://admin:admin@rabbitmq:5672/
+    depends_on:
+      order-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      warehouse-service:
+        condition: service_started
+
+  warehouse-service:
+    build:
+      context: ../services/warehouse-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - PORT=8002
+      - SERVICE_NAME=warehouse-service
+      - ENVIRONMENT=development
+      - JAEGER_ENDPOINT=http://jaeger:4318
+      - DB_HOST=warehouse-db
+      - DB_PORT=5432
+      - DB_NAME=warehouse_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - RABBITMQ_URL=amqp://admin:admin@rabbitmq:5672/
+    depends_on:
+      warehouse-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  order-db-data:
+  warehouse-db-data:
+  rabbitmq-data:
