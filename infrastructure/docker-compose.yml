@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  # Jaeger - Distributed Tracing
+
   jaeger:
     image: jaegertracing/all-in-one:1.53
     container_name: jaeger
     ports:
-      - "16686:16686" # Jaeger UI
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      - "16686:16686" 
+      - "4317:4317"  
+      - "4318:4318" 
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     healthcheck:
@@ -21,8 +21,8 @@ services:
     image: rabbitmq:3.12-management-alpine
     container_name: rabbitmq
     ports:
-      - "5672:5672"   # AMQP port
-      - "15672:15672" # Management UI
+      - "5672:5672"  
+      - "15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
@@ -70,8 +70,8 @@ services:
 
   order-service:
     build:
-      context: ../services/order-service
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/order-service/Dockerfile
     ports:
       - "8001:8001"
     environment:
@@ -79,12 +79,13 @@ services:
       - SERVICE_NAME=order-service
       - ENVIRONMENT=development
       - WAREHOUSE_SERVICE_URL=http://warehouse-service:8002
-      - JAEGER_ENDPOINT=http://jaeger:4318
+      - JAEGER_ENDPOINT=jaeger:4318
       - DB_HOST=order-db
       - DB_PORT=5432
       - DB_NAME=order_db
       - DB_USER=postgres
       - DB_PASSWORD=postgres
+      - DB_SSLMODE=disable
       - RABBITMQ_URL=amqp://admin:admin@rabbitmq:5672/
     depends_on:
       order-db:
@@ -96,20 +97,21 @@ services:
 
   warehouse-service:
     build:
-      context: ../services/warehouse-service
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/warehouse-service/Dockerfile
     ports:
       - "8002:8002"
     environment:
       - PORT=8002
       - SERVICE_NAME=warehouse-service
       - ENVIRONMENT=development
-      - JAEGER_ENDPOINT=http://jaeger:4318
+      - JAEGER_ENDPOINT=jaeger:4318
       - DB_HOST=warehouse-db
       - DB_PORT=5432
       - DB_NAME=warehouse_db
       - DB_USER=postgres
       - DB_PASSWORD=postgres
+      - DB_SSLMODE=disable
       - RABBITMQ_URL=amqp://admin:admin@rabbitmq:5672/
     depends_on:
       warehouse-db:
@@ -117,7 +119,94 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter
+    command:
+      - '--path.rootfs=/host'
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - order-service
+      - warehouse-service
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: promtail
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_healthy
+
 volumes:
   order-db-data:
   warehouse-db-data:
   rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:

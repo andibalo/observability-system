@@ -62,17 +62,19 @@ func InitSchema(db *sqlx.DB) error {
 
 	CREATE TABLE IF NOT EXISTS inbox (
 		id SERIAL PRIMARY KEY,
+		sender_id VARCHAR(255) NOT NULL,
 		message_id VARCHAR(255) UNIQUE NOT NULL,
 		event_type VARCHAR(255) NOT NULL,
 		payload JSONB NOT NULL,
-		status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
-		retry_count INT NOT NULL DEFAULT 0,
+		status VARCHAR(50) DEFAULT 'PENDING',
+		retry_count INT DEFAULT 0,
+		exchange VARCHAR(255) DEFAULT 'orders',
+		routing_key VARCHAR(255),
 		error TEXT,
 		locked_at TIMESTAMP,
 		locked_by VARCHAR(255),
-		http_status_code INT,
-		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_inbox_status ON inbox(status);
 	CREATE INDEX IF NOT EXISTS idx_inbox_message_id ON inbox(message_id);

@@ -16,6 +16,7 @@ import (
 	"order-service/internal/database"
 	"order-service/internal/handlers"
 	"order-service/internal/inbox"
+	"order-service/internal/metrics"
 	"order-service/internal/outbox"
 	"order-service/internal/routes"
 
@@ -57,6 +58,10 @@ func main() {
 	}()
 
 	log.Info("Tracer initialized successfully")
+
+	// Initialize Prometheus metrics
+	metrics.InitMetrics(cfg.ServiceName)
+	log.Info("Metrics initialized successfully")
 
 	db, err := database.NewConnection(cfg.DatabaseURL)
 	if err != nil {

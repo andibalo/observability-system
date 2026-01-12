@@ -1,17 +1,21 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+# Copy shared module
+COPY shared/ ./shared/
+
+# Copy service files
+COPY services/order-service/go.mod services/order-service/go.sum ./services/order-service/
+WORKDIR /app/services/order-service
 RUN go mod download
 
-COPY . .
-
+COPY services/order-service/ .
 RUN go build -o main ./cmd/server
 
 FROM alpine:latest
 WORKDIR /root/
-COPY --from=builder /app/main .
+COPY --from=builder /app/services/order-service/main .
 
 EXPOSE 8001
 

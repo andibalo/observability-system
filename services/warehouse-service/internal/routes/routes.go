@@ -4,8 +4,10 @@ import (
 	"observability-system/shared/logger"
 	"observability-system/shared/tracing"
 	"warehouse-service/internal/handlers"
+	"warehouse-service/internal/metrics"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func SetupRoutes(router *gin.Engine, log logger.Logger, serviceName string, handler *handlers.InventoryHandler) {
@@ -16,7 +18,10 @@ func SetupRoutes(router *gin.Engine, log logger.Logger, serviceName string, hand
 	router.Use(logger.GinMiddleware(log))
 	router.Use(gin.Recovery())
 
+	router.Use(metrics.PrometheusMiddleware(serviceName))
+
 	router.GET("/health", handler.HealthCheck)
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := router.Group("/api")
 	{

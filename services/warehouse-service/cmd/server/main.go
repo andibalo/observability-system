@@ -12,6 +12,7 @@ import (
 	"observability-system/shared/tracing"
 	"warehouse-service/internal/config"
 	"warehouse-service/internal/handlers"
+	"warehouse-service/internal/metrics"
 	"warehouse-service/internal/routes"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,10 @@ func main() {
 	}()
 
 	log.Info("Tracer initialized successfully")
+
+	// Initialize Prometheus metrics
+	metrics.InitMetrics(cfg.ServiceName)
+	log.Info("Metrics initialized successfully")
 
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
