@@ -88,7 +88,7 @@ func (s *OutboxStore) GetPendingMessagesForProcessing(ctx context.Context, worke
 func (s *OutboxStore) MarkAsPublished(ctx context.Context, messageID int64) error {
 	query := `
 		UPDATE outbox
-		SET status = 'PUBLISHED',
+		SET status = 'PROCESSED',
 			updated_at = NOW(),
 			locked_at = NULL,
 			locked_by = NULL
