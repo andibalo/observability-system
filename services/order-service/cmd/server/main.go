@@ -81,7 +81,8 @@ func main() {
 
 	var rabbitMQClient *rabbitmq.Client
 	if cfg.EnableBroker {
-		rabbitMQClient, err := rabbitmq.NewClient(cfg.RabbitMQURL)
+		var err error
+		rabbitMQClient, err = rabbitmq.NewClient(cfg.RabbitMQURL)
 		if err != nil {
 			log.Fatal("Failed to connect to RabbitMQ",
 				logger.Err(err))
@@ -107,7 +108,7 @@ func main() {
 	warehouseClient := clients.NewWarehouseClient(cfg.WarehouseServiceURL, log)
 
 	inboxHandler := handlers.NewInboxHandler(log, inboxStore)
-	orderHandler := handlers.NewOrderHandler(log, warehouseClient)
+	orderHandler := handlers.NewOrderHandler(log, warehouseClient, outboxStore)
 
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)

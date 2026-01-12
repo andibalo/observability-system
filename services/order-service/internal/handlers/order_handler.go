@@ -8,6 +8,7 @@ import (
 	"observability-system/shared/logger"
 	"observability-system/shared/tracing"
 	"order-service/internal/clients"
+	"order-service/internal/outbox"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -33,12 +34,14 @@ type Order struct {
 type OrderHandler struct {
 	logger          logger.Logger
 	warehouseClient *clients.WarehouseClient
+	outboxStore     *outbox.OutboxStore
 }
 
-func NewOrderHandler(log logger.Logger, warehouseClient *clients.WarehouseClient) *OrderHandler {
+func NewOrderHandler(log logger.Logger, warehouseClient *clients.WarehouseClient, outboxStore *outbox.OutboxStore) *OrderHandler {
 	return &OrderHandler{
 		logger:          log,
 		warehouseClient: warehouseClient,
+		outboxStore:     outboxStore,
 	}
 }
 
@@ -233,5 +236,46 @@ func (h *OrderHandler) GetAllOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"count":  len(orderList),
 		"orders": orderList,
+	})
+}
+
+func (h *OrderHandler) TestOutbox(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req struct {
+		EventType  string                 `json:"event_type" binding:"required"`
+		Exchange   string                 `json:"exchange"`
+		RoutingKey string                 `json:"routing_key"`
+		Payload    map[string]interface{} `json:"payload" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tracing.AddSpanAttributes(ctx,
+		attribute.String("event_type", req.EventType),
+		attribute.String("exchange", req.Exchange),
+		attribute.String("routing_key", req.RoutingKey),
+		attribute.String("operation", "test_outbox"),
+	)
+
+	h.logger.InfoCtx(ctx, "Creating test outbox message",
+		logger.String("event_type", req.EventType),
+		logger.String("exchange", req.Exchange),
+		logger.String("routing_key", req.RoutingKey))
+
+	messageID, err := h.outboxStore.Save(ctx, req.EventType, req.Payload, req.Exchange, req.RoutingKey)
+	if err != nil {
+		h.logger.ErrorCtx(ctx, "Failed to save test message",
+			logger.Err(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save outbox message"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":    "Test message created",
+		"message_id": messageID,
 	})
 }

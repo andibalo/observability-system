@@ -87,6 +87,8 @@ services:
       - DB_PASSWORD=postgres
       - DB_SSLMODE=disable
       - RABBITMQ_URL=amqp://admin:admin@rabbitmq:5672/
+      - ENABLE_BROKER=true
+      - MAX_RETRIES=3
     depends_on:
       order-db:
         condition: service_healthy
@@ -113,6 +115,8 @@ services:
       - DB_PASSWORD=postgres
       - DB_SSLMODE=disable
       - RABBITMQ_URL=amqp://admin:admin@rabbitmq:5672/
+      - ENABLE_BROKER=true
+      - MAX_RETRIES=3
     depends_on:
       warehouse-db:
         condition: service_healthy

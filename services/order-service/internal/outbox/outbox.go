@@ -13,7 +13,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// OutboxMessage represents a message in the outbox table
 type OutboxMessage struct {
 	ID         int64           `db:"id" json:"id"`
 	MessageID  string          `db:"message_id" json:"message_id"`
@@ -30,18 +29,16 @@ type OutboxMessage struct {
 	RoutingKey string          `db:"routing_key" json:"routing_key"`
 }
 
-// OutboxStore handles outbox operations using sqlx
 type OutboxStore struct {
 	db *sqlx.DB
 }
 
-// NewOutboxStore creates a new outbox store
 func NewOutboxStore(db *sqlx.DB) *OutboxStore {
 	return &OutboxStore{db: db}
 }
 
 // Save saves a message to the outbox
-func (s *OutboxStore) Save(ctx context.Context, eventType string, payload interface{}) (string, error) {
+func (s *OutboxStore) Save(ctx context.Context, eventType string, payload interface{}, exchange, routingKey string) (string, error) {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
@@ -49,10 +46,10 @@ func (s *OutboxStore) Save(ctx context.Context, eventType string, payload interf
 
 	messageID := uuid.New().String()
 	query := `
-		INSERT INTO outbox (message_id, event_type, payload, status)
-		VALUES ($1, $2, $3, 'PENDING')
+		INSERT INTO outbox (message_id, event_type, payload, status, exchange, routing_key)
+		VALUES ($1, $2, $3, 'PENDING', $4, $5)
 	`
-	_, err = s.db.ExecContext(ctx, query, messageID, eventType, payloadJSON)
+	_, err = s.db.ExecContext(ctx, query, messageID, eventType, payloadJSON, exchange, routingKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to save outbox message: %w", err)
 	}
@@ -60,8 +57,6 @@ func (s *OutboxStore) Save(ctx context.Context, eventType string, payload interf
 	return messageID, nil
 }
 
-// GetPendingMessagesForProcessing gets messages with pessimistic locking
-// Uses FOR UPDATE SKIP LOCKED to allow concurrent workers
 func (s *OutboxStore) GetPendingMessagesForProcessing(ctx context.Context, workerID string, batchSize int) ([]OutboxMessage, error) {
 	query := `
 		UPDATE outbox
@@ -90,7 +85,6 @@ func (s *OutboxStore) GetPendingMessagesForProcessing(ctx context.Context, worke
 	return messages, nil
 }
 
-// MarkAsPublished marks a message as published
 func (s *OutboxStore) MarkAsPublished(ctx context.Context, messageID int64) error {
 	query := `
 		UPDATE outbox
@@ -104,7 +98,6 @@ func (s *OutboxStore) MarkAsPublished(ctx context.Context, messageID int64) erro
 	return err
 }
 
-// MarkAsFailed marks a message as failed and increments retry count
 func (s *OutboxStore) MarkAsFailed(ctx context.Context, messageID int64, errorMsg string) error {
 	query := `
 		UPDATE outbox
@@ -120,7 +113,6 @@ func (s *OutboxStore) MarkAsFailed(ctx context.Context, messageID int64, errorMs
 	return err
 }
 
-// ResetStuckMessages resets messages that have been locked too long
 func (s *OutboxStore) ResetStuckMessages(ctx context.Context, timeoutMinutes int) (int64, error) {
 	query := `
 		UPDATE outbox
@@ -141,7 +133,6 @@ func (s *OutboxStore) ResetStuckMessages(ctx context.Context, timeoutMinutes int
 	return rowsAffected, nil
 }
 
-// OutboxWorker processes outbox messages concurrently
 type OutboxWorker struct {
 	store     *OutboxStore
 	logger    logger.Logger
@@ -152,7 +143,6 @@ type OutboxWorker struct {
 	publisher messaging.Publisher
 }
 
-// NewOutboxWorker creates a new outbox worker
 func NewOutboxWorker(
 	store *OutboxStore,
 	publisher messaging.Publisher,
@@ -171,7 +161,6 @@ func NewOutboxWorker(
 	}
 }
 
-// Start begins processing messages
 func (w *OutboxWorker) Start(ctx context.Context) {
 	w.logger.Info("Starting outbox worker",
 		logger.String("worker_id", w.workerID),
@@ -181,7 +170,6 @@ func (w *OutboxWorker) Start(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Reset stuck messages on startup
 	if count, err := w.store.ResetStuckMessages(ctx, 5); err != nil {
 		w.logger.Error("Failed to reset stuck messages", logger.Err(err))
 	} else if count > 0 {
@@ -204,7 +192,6 @@ func (w *OutboxWorker) Start(ctx context.Context) {
 	}
 }
 
-// Stop gracefully stops the worker
 func (w *OutboxWorker) Stop() {
 	close(w.stopCh)
 }
@@ -235,7 +222,6 @@ func (w *OutboxWorker) processMessages(ctx context.Context) {
 				logger.String("event_type", msg.EventType),
 				logger.String("worker_id", w.workerID))
 
-			// Mark as failed
 			if err := w.store.MarkAsFailed(ctx, msg.ID, err.Error()); err != nil {
 				w.logger.Error("Failed to mark message as failed",
 					logger.Err(err),
@@ -244,7 +230,6 @@ func (w *OutboxWorker) processMessages(ctx context.Context) {
 			continue
 		}
 
-		// Mark as published
 		if err := w.store.MarkAsPublished(ctx, msg.ID); err != nil {
 			w.logger.Error("Failed to mark message as published",
 				logger.Err(err),
@@ -260,13 +245,12 @@ func (w *OutboxWorker) processMessages(ctx context.Context) {
 }
 
 func (w *OutboxWorker) processMessage(ctx context.Context, msg OutboxMessage) error {
-	// Parse payload
+
 	var payload map[string]interface{}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
 
-	// Create message for publisher
 	message := messaging.Message{
 		ID:        msg.MessageID,
 		Type:      msg.EventType,
@@ -274,11 +258,9 @@ func (w *OutboxWorker) processMessage(ctx context.Context, msg OutboxMessage) er
 		Timestamp: msg.CreatedAt,
 	}
 
-	// Use exchange and routing key from the message
 	exchange := msg.Exchange
 	routingKey := msg.RoutingKey
 
-	// Fallback to defaults if not set
 	if exchange == "" {
 		exchange = "orders"
 	}
@@ -286,7 +268,6 @@ func (w *OutboxWorker) processMessage(ctx context.Context, msg OutboxMessage) er
 		routingKey = msg.EventType
 	}
 
-	// Publish to message broker
 	if err := w.publisher.Publish(exchange, routingKey, message); err != nil {
 		return fmt.Errorf("failed to publish message: %w", err)
 	}

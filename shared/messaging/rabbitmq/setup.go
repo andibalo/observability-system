@@ -2,15 +2,14 @@ package rabbitmq
 
 import "log"
 
-// SetupExchangesAndQueues sets up the exchanges and queues for the microservices
 func SetupExchangesAndQueues(client *Client) error {
-	// Declare exchanges
 	exchanges := []struct {
 		name string
 		kind string
 	}{
 		{"orders", "topic"},
 		{"inventory", "topic"},
+		{"warehouse", "topic"},
 	}
 
 	for _, ex := range exchanges {
@@ -20,7 +19,6 @@ func SetupExchangesAndQueues(client *Client) error {
 		log.Printf("Declared exchange: %s (%s)", ex.name, ex.kind)
 	}
 
-	// Declare queues
 	queues := []string{
 		"order.created",
 		"order.updated",
@@ -28,6 +26,7 @@ func SetupExchangesAndQueues(client *Client) error {
 		"inventory.reserved",
 		"inventory.released",
 		"inventory.updated",
+		"warehouse.test",
 	}
 
 	for _, queue := range queues {
@@ -37,7 +36,6 @@ func SetupExchangesAndQueues(client *Client) error {
 		log.Printf("Declared queue: %s", queue)
 	}
 
-	// Bind queues to exchanges
 	bindings := []struct {
 		queue      string
 		exchange   string
@@ -49,6 +47,7 @@ func SetupExchangesAndQueues(client *Client) error {
 		{"inventory.reserved", "inventory", "inventory.reserved"},
 		{"inventory.released", "inventory", "inventory.released"},
 		{"inventory.updated", "inventory", "inventory.updated"},
+		{"warehouse.test", "warehouse", "warehouse.test"},
 	}
 
 	for _, binding := range bindings {

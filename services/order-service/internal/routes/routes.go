@@ -37,5 +37,7 @@ func SetupRoutes(
 		api.POST("/orders", orderHandler.CreateOrder)
 		api.GET("/orders", orderHandler.GetAllOrders)
 		api.GET("/orders/:order_id", orderHandler.GetOrder)
+
+		api.POST("/test-outbox", orderHandler.TestOutbox)
 	}
 }
